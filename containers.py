@@ -2,23 +2,22 @@
 import re
 import json
 import requests
+import os
 from collections import OrderedDict
-from random import randint
-from uuid import uuid4
 from pprint import pprint
 
 from tools import json_load_byteified, recursive_json_loads, make_iteritems
-from types import TYPES
 
 VARIABLES_REGEX = r'(?<=<\$)([^\$]*)(?=\$>)'
 REMOVETYPE_REGEX = r'\|([^\$]*)(?=\$>)'
 
 
-class VariableContainer(object):
+class SuiteNamespaceAccessor(object):
     _vars = {}
+    _var_map = {}
 
     def __init__(self):
-        super(VariableContainer, self).__init__()
+        super(SuiteNamespaceAccessor, self).__init__()
 
     def _vars_values(self):
         return {var.name: var.value for var in self._vars.values()}
@@ -75,7 +74,7 @@ class ReqVariable(object):
         value = value or self.value
         if self.type:
             try:
-                self.value = TYPES[self.type](value)
+                self.value = self.var_map[self.type](value)
             except Exception as ex:
                 pass
         else:
@@ -89,16 +88,16 @@ class ReqVariable(object):
         return self.value
 
 
-class RequestTest(VariableContainer):
+class RequestTest(SuiteNamespaceAccessor):
 
     def __init__(self, request):
         super(RequestTest, self).__init__()
         self.url = request['url']
         self.body = recursive_json_loads(request['rawModeData'])
         self.method = request['method']
-        name = request['name'].split()
+        name = request['name'].upper().split()
         self.resource = name[0]
-        self.repetitions = randint(2, 4) if 'repeate' in request['name'] else 1
+        self.repetitions = name[-1] if 'REPEATE' in name else 1
         self.headers = {}
         for header in request['headers'].split('\n'):
                 header = header.split(': ')
@@ -138,14 +137,17 @@ class RequestTest(VariableContainer):
                 yield (resp.status_code, resp.content)
 
 
-class Collection(VariableContainer):
+class Collection(SuiteNamespaceAccessor):
 
     def __init__(self):
         super(Collection, self).__init__()
         self.requests = OrderedDict()
 
-    def from_file(self, file_path):
-        file_path = os.path.join(os.cwd(), file_path)
+    def add_var_map(self, var_map):
+        self._var_map.update(var_map)
+
+    def suite_from_file(self, file_path):
+        file_path = os.path.join(os.getcwd(), file_path)
         with open(file_path) as jfile:
             req_collection = json_load_byteified(jfile)
         reqs = req_collection['requests']
@@ -169,7 +171,8 @@ class Collection(VariableContainer):
 
 
 c = Collection()
-c.from_file('CRM.json')
+c.suite_from_file('CRM.json')
+from uuid import uuid4
+c.add_var_map({'int': int, 'randuuid': lambda x: str(uuid4()),})
 pprint({k: v.__dict__ for k, v in c._vars.iteritems()})
-#for x in range(50):
-#    c.run(delete=False)
+#c.run(delete=False)
